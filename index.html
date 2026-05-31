@@ -540,6 +540,20 @@
             return (mySelectedOfferPets || []).filter(Boolean).length;
         }
 
+        const PET_DELETE_SCORE_REWARD = {
+            'sıradan': 5,
+            'nadir': 15,
+            'epik': 40,
+            'mistik': 100,
+            'efsanevi': 250,
+            'ultra': 500
+        };
+
+        function getDeleteScoreReward(pet) {
+            const rarity = String(pet?.rarity || 'sıradan').toLowerCase();
+            return PET_DELETE_SCORE_REWARD[rarity] ?? 5;
+        }
+
         // Auto-Clicker Prevention Variables
         let clickTimestamps = [];
         const ANTICHEAT_WINDOW_MS = 1000; // 1 second window
@@ -882,7 +896,7 @@
                         <button onclick="toggleEquipPet('${pet.id}')" class="flex-1 text-[8px] font-bold py-1 rounded text-white ${isEquipped ? 'bg-amber-600' : 'bg-indigo-600'}">
                             ${isEquipped ? 'Çıkar' : 'Kuşan'}
                         </button>
-                        <button onclick="deletePetPrompt('${pet.id}', index)" class="bg-red-950 border border-red-800 text-red-400 p-1 rounded text-[8px]">
+                        <button onclick="deletePetPrompt('${pet.id}')" class="bg-red-950 border border-red-800 text-red-400 p-1 rounded text-[8px]">
                             Sil
                         </button>
                     </div>
@@ -917,18 +931,39 @@
 
         // DELETE ANIMAL OPTION VIA PERMANENT ACTION
         window.deletePetPrompt = async function(petId) {
-            if(!confirm("Bu evcil hayvanı kalıcı olarak envanterinizden silmek istediğinize emin misiniz? Bu işlem geri alınamaz.")) return;
-            
-            let inv = [...(currentUserData.inventory || [])];
-            let eq = [...(currentUserData.equipped || [])];
+            if (!currentUserData) return;
 
-            inv = inv.filter(p => p.id !== petId);
-            eq = eq.filter(p => p.id !== petId);
+            const inventoryPet = (currentUserData.inventory || []).find(p => p.id === petId);
+            if (!inventoryPet) {
+                alert("Silinecek pet bulunamadı.");
+                return;
+            }
 
-            await updateDoc(doc(db, "users", currentUserData.uid), {
-                inventory: inv,
-                equipped: eq
-            });
+            const scoreReward = getDeleteScoreReward(inventoryPet);
+            if (!confirm(`Bu peti silerseniz +${scoreReward} skor aktarılacak. Emin misiniz? Bu işlem geri alınamaz.`)) return;
+
+            const userDocRef = doc(db, "users", currentUserData.uid);
+
+            try {
+                await runTransaction(db, async (transaction) => {
+                    const userSnap = await transaction.get(userDocRef);
+                    if (!userSnap.exists()) throw new Error("Kullanıcı profili bulunamadı.");
+
+                    const userData = userSnap.data() || {};
+                    const inv = [...(userData.inventory || [])].filter(p => p.id !== petId);
+                    const eq = [...(userData.equipped || [])].filter(p => p.id !== petId);
+
+                    transaction.update(userDocRef, {
+                        inventory: inv,
+                        equipped: eq,
+                        score: (userData.score || 0) + scoreReward
+                    });
+                });
+
+                alert(`Pet silindi. +${scoreReward} skor hesabına aktarıldı.`);
+            } catch (err) {
+                alert("Silme işlemi başarısız: " + err.message);
+            }
         };
 
         // RENDER COMPACT EXQUISITE MINI EQUIPPED SLOTS ON DASHBOARD
